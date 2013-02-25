@@ -1,0 +1,3 @@
+[submodule "dbapi"]
+	path = dbapi
+	url = git://github.com/bcherry/dropbox-js.git
