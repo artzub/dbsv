@@ -1,91 +1,264 @@
 <!DOCTYPE html>
 <head>
     <meta charset="utf-8">
-    <style>
-
-        path {
-            stroke: #fff;
-            fill-rule: evenodd;
+    <link rel="stylesheet" href="style.css">
+    <script src="//d3js.org/d3.v3.min.js"></script>
+    <script src="//cdnjs.cloudflare.com/ajax/libs/dropbox.js/0.9.1/dropbox.min.js"></script>
+    <script>
+        if (document.location.href.indexOf("dboauth_token") > -1) {
+            Dropbox.Drivers.Popup.oauthReceiver();
         }
-
-    </style>
-    <script src="http://d3js.org/d3.v3.min.js"></script>
-    <script src="http://code.jquery.com/jquery-1.9.1.min.js"></script>
-    <script src="dbapi/dropbox.js"></script>
+    </script>
 </head>
 <body>
+<header>
+    <div class="userInfo">
+        <button id="singOut" style="display: none">Sing out</button>
+        <span id="userName"></span>
+    </div>
+</header>
+<section id="canvas"></section>
+
 <script>
-    if (document.location.search.indexOf('uid'))
-        window.close();
+    'use strict';
 
-    var session = new Dropbox.Session('7b49k68tq0ph77g', 'w4iuwkmd5g4kkfn', 'dropbox'),
-        client = new Dropbox.Client(session);
+    var PI2 = Math.PI * 2,
+        sizes = {
+        bytes : 1,
+        KB : 1024
+    };
 
-    var params;
+    sizes.MB = sizes.KB * 1024;
+    sizes.GB = sizes.MB * 1024;
+    sizes.TB = sizes.GB * 1024;
+    sizes.PB = sizes.TB * 1024;
+
+    var dirTree = {},
+        params = {};
 
     function log(data) {
         console.log(data);
     }
 
-    session.obtainRequestToken(function() {
-        console.log(session);
-
-        window.open(session.buildAuthorizeUrl() + "&oauth_callback=" + encodeURIComponent(document.location));
-
-        session.obtainAccessToken(function() {
-            client.accountInfo(log, log);
-            client.metadata({path : '/'}, log, log);
-        });
-    });
-
-    function getData() {
-
+    if (document.location.href.indexOf("dboauth_token") > -1) {
+        d3.select(body)
+            .call(function(b) {
+                b.append("h1")
+                    .text("Dropbox sign-in successful");
+                b.append("h1")
+                    .text("Please close this window.");
+            })
     }
-    /*var width = 960,
-        height = 700,
-        radius = Math.min(width, height) / 2;
+    else {
+        document.location.hash.replace("#", "").split("&").forEach(function(d) {
+            d = d.split('=');
+            params[d[0]] = d[1];
+        });
+
+        init();
+    }
+
+    var asyncForEach = function(items, fn, time) {
+        if (!(items instanceof Array))
+            return;
+
+        var workArr = items.reverse().concat();
+
+        function loop() {
+            if (workArr.length > 0)
+                fn(workArr.shift(), workArr);
+            if (workArr.length > 0)
+                setTimeout(loop, time || 1);
+        }
+        loop();
+    };
+
+    function init() {
+        var client = new Dropbox.Client({
+            key: 'ckm2hBAId3A=|26xJN4AcvG9VThBPWqf7qwB0PQOtcRSGeKwQVYh8OA==',
+            rememberUser: true
+        });
+
+        client.authDriver(new Dropbox.Drivers.Popup({
+            receiverUrl: "http://dbsv.artzub.com"
+        }));
+
+        client.authenticate(function(error, client) {
+            if (error) {
+                log(error);
+                return;
+            }
+
+            getUserInfo(client);
+        });
+
+        function getUserInfo(client) {
+            client.getUserInfo(parseUserInfo);
+        }
+
+        function parseUserInfo(error, data) {
+            if (error) {
+                log(error);
+                return;
+            }
+
+            d3.select("#singOut")
+                .style("display", null)
+                .on("click", singOut);
+            d3.select("#userName")
+                .text(data.name);
+
+            params.root = decodeURIComponent(params.root) || "/";
+
+            dirTree = {
+                name : "",
+                path : params.root,
+                children : [],
+                level : 0
+            };
+
+            if (params.root == "/")
+                dirTree.children = [{
+                    name : "Free Space",
+                    path : "/Free Space",
+                    children : [{
+                        name : "Free Space",
+                        path : "/Free/Space",
+                        size : data.quota - data.usedQuota,
+                        level : 2
+                    }],
+                    level : 1
+                }];
+
+            getData(params.root, dirTree);
+        }
+
+        function getData(path, dir) {
+            client.metadata(path, {readDir : true}, parseDirInfo(dir));
+        }
+
+        function parseDirInfo(dir) {
+            return function(error, data) {
+                if (error) {
+                    log(error);
+                    return;
+                }
+                data._json.contents
+                    && asyncForEach(data._json.contents, analyseDirInfo(dir));
+            }
+        }
+
+        function getName(path) {
+            return path.substr(path.lastIndexOf("/") + 1);
+        }
+
+        function convertSize(size) {
+            var a = size.split(" ");
+            return a[0] * sizes[a[1]];
+        }
+
+        function analyseDirInfo(dir) {
+            return function(d) {
+                var f = {
+                    name : getName(d.path),
+                    path : d.path,
+                    level : dir.level + 1
+                };
+                dir.children.push(f);
+
+                if (d.is_dir) {
+                    f.children = [];
+                    getData(d.path, f);
+                }
+                else {
+                    f.size = convertSize(d.size);
+                }
+                update();
+            }
+        }
+
+        function singOut() {
+            client.signOut(function(error) {
+                if (error) {
+                    log(error);
+                    return;
+                }
+                d3.select("#singOut")
+                    .style("display", "none");
+                d3.select("#userName")
+                    .text("");
+            });
+        }
+    }
+
+    // http://bl.ocks.org/mbostock/4348373
+
+    var w = window.innerWidth,
+        h = window.innerHeight,
+        radius = Math.min(w, h) / 2,
+        path;
 
     var x = d3.scale.linear()
-            .range([0, 2 * Math.PI]);
+            .range([0, PI2]);
 
     var y = d3.scale.sqrt()
             .range([0, radius]);
 
     var color = d3.scale.category20c();
 
-    var svg = d3.select("body").append("svg")
-            .attr("width", width)
-            .attr("height", height)
+    var svg = d3.select("#canvas").append("svg")
+            .attr("width", w)
+            .attr("height", h)
             .append("g")
-            .attr("transform", "translate(" + width / 2 + "," + (height / 2 + 10) + ")");
+            .attr("transform", "translate(" + w / 2 + "," + (h / 2 + 10) + ")");
 
     var partition = d3.layout.partition()
             .value(function(d) { return d.size; });
 
     var arc = d3.svg.arc()
-            .startAngle(function(d) { return Math.max(0, Math.min(2 * Math.PI, x(d.x))); })
-            .endAngle(function(d) { return Math.max(0, Math.min(2 * Math.PI, x(d.x + d.dx))); })
-            .innerRadius(function(d) { return Math.max(0, y(d.y)); })
-            .outerRadius(function(d) { return Math.max(0, y(d.y + d.dy)); });
+        .startAngle(function(d) { return Math.max(0, Math.min(PI2, x(d.x))); })
+        .endAngle(function(d) { return Math.max(0, Math.min(PI2, x(d.x + d.dx))); })
+        .innerRadius(function(d) { return Math.max(0, y(d.y)); })
+        .outerRadius(function(d) { return Math.max(0, y(d.y + d.dy)); });
 
-    dropbox._request("1/metadata", {})
+    function toRgba(c, a) {
+        c = d3.rgb(c);
+        return "rgba(" + [c.r, c.g, c.b, a] + ")";
+    }
 
-    /*d3.json("/d/4063550/flare.json", function(error, root) {
-        var path = svg.selectAll("path")
-                .data(partition.nodes(root))
-                .enter().append("path")
-                .attr("d", arc)
-                .style("fill", function(d) { return color((d.children ? d : d.parent).name); })
-                .on("click", click);
+    function fill(d) {
+        var k = (d.children ? d : d.parent).path;
+        return d == dirTree.children[0] || d == dirTree.children[0].children[0] ? toRgba("#444", .1) : color(k);
+    }
 
-        function click(d) {
-            path.transition()
-                    .duration(750)
-                    .attrTween("d", arcTween(d));
-        }
-    });
+    function key(d) {
+        return d.path;
+    }
 
-    d3.select(self.frameElement).style("height", height + "px");
+    function filter(d) {
+        return d.level < 4;
+    }
+
+    function update() {
+        path = svg.selectAll("path")
+            .data(partition.nodes(dirTree).filter(filter), key);
+
+        path.enter()
+            .append("path")
+            .style("fill", fill)
+            //.style("stroke", fill)
+            .on("click", click);
+
+        path.exit().remove();
+
+        path.attr("d", arc);
+    }
+
+    function click(d) {
+        path.transition()
+            .duration(750)
+            .attrTween("d", arcTween(d));
+    }
 
     // Interpolate the scales!
     function arcTween(d) {
@@ -97,6 +270,6 @@
                     ? function(t) { return arc(d); }
                     : function(t) { x.domain(xd(t)); y.domain(yd(t)).range(yr(t)); return arc(d); };
         };
-    } */
+    }
 
 </script>
