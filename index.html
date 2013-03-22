@@ -2,7 +2,9 @@
 <head>
     <meta charset="utf-8">
     <link rel="stylesheet" href="style.css">
-    <script src="//d3js.org/d3.v3.min.js"></script>
+    <script src="//d3js.org/d3.v3.min.js" charset="utf-8"></script>
+    <script src="tooltip.js" charset="utf-8"></script>
+    <script src="progressbar.js" charset="utf-8"></script>
     <script src="//cdnjs.cloudflare.com/ajax/libs/dropbox.js/0.9.1/dropbox.min.js"></script>
     <script>
         if (document.location.href.indexOf("dboauth_token") > -1) {
@@ -12,6 +14,7 @@
 </head>
 <body>
 <header>
+    <button id="run">Pause</button>
     <div class="userInfo">
         <button id="singOut" style="display: none">Sing out</button>
         <span id="userName"></span>
@@ -24,9 +27,10 @@
 
     var PI2 = Math.PI * 2,
         sizes = {
-        bytes : 1,
-        KB : 1024
-    };
+            bytes : 1,
+            KB : 1024
+        }
+    ;
 
     sizes.MB = sizes.KB * 1024;
     sizes.GB = sizes.MB * 1024;
@@ -34,7 +38,9 @@
     sizes.PB = sizes.TB * 1024;
 
     var dirTree = {},
-        params = {};
+        params = {},
+        selected,
+        pause, doStart;
 
     function log(data) {
         console.log(data);
@@ -74,6 +80,32 @@
     };
 
     function init() {
+        var requestTurn = [],
+            to = 10,
+            loop;
+
+        function appendToRT(item) {
+            item && requestTurn.push(item);
+            if (pause || loop)
+                return;
+            loop = setTimeout(function run() {
+                var d = !pause;
+
+                d && (d = requestTurn.shift());
+
+                if (d) {
+                    getData(d.path, d.f);
+                    loop = setTimeout(run, to);
+                }
+                else {
+                    clearTimeout(loop);
+                    loop = null;
+                }
+            }, to);
+        }
+
+        doStart = appendToRT;
+
         var client = new Dropbox.Client({
             key: 'ckm2hBAId3A=|26xJN4AcvG9VThBPWqf7qwB0PQOtcRSGeKwQVYh8OA==',
             rememberUser: true
@@ -108,9 +140,9 @@
             d3.select("#userName")
                 .text(data.name);
 
-            params.root = decodeURIComponent(params.root) || "/";
+            params.root = decodeURIComponent(params.root || "/");
 
-            dirTree = {
+            selected = dirTree = {
                 name : "",
                 path : params.root,
                 children : [],
@@ -130,6 +162,8 @@
                     level : 1
                 }];
 
+            progress.max(0);
+
             getData(params.root, dirTree);
         }
 
@@ -143,8 +177,11 @@
                     log(error);
                     return;
                 }
+                progress.max(progress.max() + data._json.contents.length);
                 data._json.contents
-                    && asyncForEach(data._json.contents, analyseDirInfo(dir));
+                    && data._json.contents.forEach(analyseDirInfo(dir));
+                progress.step()
+                        .label(progress.pos() + " of " + progress.max());
             }
         }
 
@@ -168,10 +205,13 @@
 
                 if (d.is_dir) {
                     f.children = [];
-                    getData(d.path, f);
+                    appendToRT({path : d.path, f : f});
                 }
                 else {
-                    f.size = convertSize(d.size);
+                    progress.step()
+                            .label(progress.pos() + " of " + progress.max());
+                    f.orignsize = d.size;
+                    f.size = d.bytes;
                 }
                 update();
             }
@@ -198,6 +238,12 @@
         radius = Math.min(w, h) / 2,
         path;
 
+    d3.select("#run").on("click", function() {
+        pause = !pause;
+        this.innerText = pause ? "Start" : "Pause";
+        !pause && doStart && doStart();
+    });
+
     var x = d3.scale.linear()
             .range([0, PI2]);
 
@@ -208,8 +254,16 @@
 
     var svg = d3.select("#canvas").append("svg")
             .attr("width", w)
-            .attr("height", h)
-            .append("g")
+            .attr("height", h);
+
+    var progress = svg.append("g")
+        .call(d3.helper.progressbar)
+        .width(w)
+    ;
+    progress.textPosition("middle")
+        .attr("transform", "translate(" + [0, h - progress.height()] + ")");
+
+    svg = svg.append("g")
             .attr("transform", "translate(" + w / 2 + "," + (h / 2 + 10) + ")");
 
     var partition = d3.layout.partition()
@@ -221,6 +275,54 @@
         .innerRadius(function(d) { return Math.max(0, y(d.y)); })
         .outerRadius(function(d) { return Math.max(0, y(d.y + d.dy)); });
 
+    var tf = d3.format(',00');
+
+    function formatSize(d) {
+        var s = sizes.B,
+            af = " B";
+
+        if (d < sizes.KB) {
+        }
+        else if (d < sizes.MB) {
+            s = sizes.KB;
+            af = " KB";
+        }
+        else if (d < sizes.GB) {
+            s = sizes.MB;
+            af = " MB";
+        }
+        else if (d < sizes.TB) {
+            s = sizes.GB;
+            af = " GB";
+        }
+        else if (d < sizes.PB) {
+            s = sizes.TB;
+            af = " TB";
+        }
+        else if (d > sizes.PB) {
+            s = sizes.PB;
+            af = " PB";
+        }
+
+        return tf(d/s) + af;
+    }
+
+    var tooltip = d3.helper.tooltip()
+        .padding(16)
+        .spaceWidth(w)
+        .spaceHeight(h)
+        .text(function(d) {
+            return [
+                "Name: <b>",
+                d.name,
+                "</b><br/>Path: <b>",
+                d.path.replace(d.name, ""),
+                "</b><br/>Size: <b>",
+                formatSize(d.value),
+                "</b><br/>"
+            ].join("")
+        })
+    ;
     function toRgba(c, a) {
         c = d3.rgb(c);
         return "rgba(" + [c.r, c.g, c.b, a] + ")";
@@ -236,17 +338,19 @@
     }
 
     function filter(d) {
-        return d.level < 4;
+        return selected
+            ? (d.path.indexOf(selected.path) == 0 || d == selected.parent)
+            : d.level < 4;
     }
 
     function update() {
         path = svg.selectAll("path")
-            .data(partition.nodes(dirTree).filter(filter), key);
+            .data(partition(dirTree).filter(filter), key);
 
         path.enter()
             .append("path")
             .style("fill", fill)
-            //.style("stroke", fill)
+            .call(tooltip)
             .on("click", click);
 
         path.exit().remove();
@@ -257,7 +361,8 @@
     function click(d) {
         path.transition()
             .duration(750)
-            .attrTween("d", arcTween(d));
+            .attrTween("d", arcTween(d))
+            .each("end", update);
     }
 
     // Interpolate the scales!
@@ -265,6 +370,7 @@
         var xd = d3.interpolate(x.domain(), [d.x, d.x + d.dx]),
                 yd = d3.interpolate(y.domain(), [d.y, 1]),
                 yr = d3.interpolate(y.range(), [d.y ? 20 : 0, radius]);
+        selected = d;
         return function(d, i) {
             return i
                     ? function(t) { return arc(d); }
