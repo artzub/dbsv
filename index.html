@@ -2,26 +2,25 @@
 <head>
     <meta charset="utf-8">
     <link rel="stylesheet" href="style.css">
-    <script src="//d3js.org/d3.v3.min.js" charset="utf-8"></script>
-    <script src="tooltip.js" charset="utf-8"></script>
-    <script src="progressbar.js" charset="utf-8"></script>
-    <script src="//cdnjs.cloudflare.com/ajax/libs/dropbox.js/0.9.1/dropbox.min.js"></script>
-    <script>
-        if (document.location.href.indexOf("dboauth_token") > -1) {
-            Dropbox.Drivers.Popup.oauthReceiver();
-        }
-    </script>
 </head>
 <body>
 <header>
-    <button id="run">Pause</button>
+    <div class="toolbar">
+        <button id="run">Pause</button>
+        <span id="wtr">Waiting for reset of requests limit. In 3 seconds ...</span>
+    </div>
     <div class="userInfo">
-        <button id="singOut" style="display: none">Sing out</button>
         <span id="userName"></span>
+        <button id="singOut" style="display: none">Sing out</button>
     </div>
 </header>
 <section id="canvas"></section>
 
+<script src="msg.js"></script>
+<script src="//d3js.org/d3.v3.min.js" charset="utf-8"></script>
+<script src="tooltip.js" charset="utf-8"></script>
+<script src="progressbar.js" charset="utf-8"></script>
+<script src="//cdnjs.cloudflare.com/ajax/libs/dropbox.js/0.10.2/dropbox.min.js"></script>
 <script>
     'use strict';
 
@@ -37,55 +36,110 @@
     sizes.TB = sizes.GB * 1024;
     sizes.PB = sizes.TB * 1024;
 
-    var dirTree = {},
-        params = {},
-        selected,
-        pause, doStart;
+    var dirTree = {}
+            , dirTreeDraw = {}
+            , requestTurn = []
+            , params = {}
+            , selected
+            , doStart
+            , pause
+            , loop
+            , loopSnd
+            , loopThr
+            , to = 10
+            , seq = 0
+            ;
 
-    function log(data) {
-        console.log(data);
+    function logError(error) {
+        log("error", error);
     }
 
-    if (document.location.href.indexOf("dboauth_token") > -1) {
-        d3.select(body)
-            .call(function(b) {
-                b.append("h1")
-                    .text("Dropbox sign-in successful");
-                b.append("h1")
-                    .text("Please close this window.");
-            })
-    }
-    else {
-        document.location.hash.replace("#", "").split("&").forEach(function(d) {
-            d = d.split('=');
-            params[d[0]] = d[1];
-        });
-
-        init();
+    function prgInc() {
+        progress.step()
+                .label(progress.pos() + " of " + progress.max());
     }
 
-    var asyncForEach = function(items, fn, time) {
-        if (!(items instanceof Array))
-            return;
+    function prgMax(max) {
+        progress.max(progress.max() + max);
+    }
 
-        var workArr = items.reverse().concat();
+    function log(label, data) {
+        if (arguments.length < 2)
+            console.log(label);
+        else
+            console.log(label, data);
+    }
 
-        function loop() {
-            if (workArr.length > 0)
-                fn(workArr.shift(), workArr);
-            if (workArr.length > 0)
-                setTimeout(loop, time || 1);
-        }
-        loop();
-    };
+    hideWaiter();
+
+    document.location.hash.replace("#", "").split("&").forEach(function(d) {
+        d = d.split('=');
+        params[d[0]] = d[1];
+    });
 
     function init() {
-        var requestTurn = [],
-            to = 10,
-            loop;
+
+        var client = new Dropbox.Client({
+            key: "7b49k68tq0ph77g",
+            rememberUser: true
+        });
+
+        client.authDriver(new Dropbox.AuthDriver.Redirect({
+            receiverUrl: "http://localhost:63342/dbsv/index.html"
+        }));
+
+        client.authenticate(function(error, client) {
+            if (error) {
+                log("authError", error);
+                return;
+            }
+
+            getUserInfo(client);
+        });
+
+
+        function getUserInfo(client) {
+            client.getUserInfo(parseUserInfo);
+        }
+
+        function parseUserInfo(error, data) {
+            if (error) {
+                logError(error);
+                return;
+            }
+
+            d3.select("#singOut")
+                    .style("display", null)
+                    .on("click", singOut);
+            d3.select("#userName")
+                    .text(data.name);
+
+            params.root = decodeURIComponent(params.root || "/");
+
+            selected = dirTree = {
+                name : "",
+                path : params.root,
+                children : [],
+                level : 0,
+                is_dir : true,
+                size : data.quota
+            };
+
+            if (params.root == "/")
+                dirTree.children = [{
+                    name : "Free Space",
+                    path : "/.FreeSpace",
+                    size : data.quota - data.usedQuota,
+                    level : 1
+                }];
+
+            progress.max(0);
+
+            getData(params.root, dirTree);
+        }
 
         function appendToRT(item) {
-            item && requestTurn.push(item);
+            item && (item.f.seqid = (++seq)) && requestTurn.push(item);
             if (pause || loop)
                 return;
             loop = setTimeout(function run() {
@@ -104,89 +158,84 @@
             }, to);
         }
 
+        function insertDataBack(dir) {
+            requestTurn.splice(0, 0, {path : dir.path, f : dir});
+            requestTurn.sort(function(a, b) {
+                    return d3.ascending(a.f.seqid, b.f.seqid);
+            });
+        }
+
         doStart = appendToRT;
-
-        var client = new Dropbox.Client({
-            key: 'ckm2hBAId3A=|26xJN4AcvG9VThBPWqf7qwB0PQOtcRSGeKwQVYh8OA==',
-            rememberUser: true
-        });
-
-        client.authDriver(new Dropbox.Drivers.Popup({
-            receiverUrl: "http://dbsv.artzub.com"
-        }));
-
-        client.authenticate(function(error, client) {
-            if (error) {
-                log(error);
-                return;
-            }
-
-            getUserInfo(client);
-        });
-
-        function getUserInfo(client) {
-            client.getUserInfo(parseUserInfo);
-        }
-
-        function parseUserInfo(error, data) {
-            if (error) {
-                log(error);
-                return;
-            }
-
-            d3.select("#singOut")
-                .style("display", null)
-                .on("click", singOut);
-            d3.select("#userName")
-                .text(data.name);
-
-            params.root = decodeURIComponent(params.root || "/");
-
-            selected = dirTree = {
-                name : "",
-                path : params.root,
-                children : [],
-                level : 0
-            };
-
-            if (params.root == "/")
-                dirTree.children = [{
-                    name : "Free Space",
-                    path : "/Free Space",
-                    children : [{
-                        name : "Free Space",
-                        path : "/Free/Space",
-                        size : data.quota - data.usedQuota,
-                        level : 2
-                    }],
-                    level : 1
-                }];
-
-            progress.max(0);
-
-            getData(params.root, dirTree);
-        }
 
         function getData(path, dir) {
             client.metadata(path, {readDir : true}, parseDirInfo(dir));
         }
 
-        function parseDirInfo(dir) {
-            return function(error, data) {
-                if (error) {
-                    log(error);
-                    return;
+        function getName(path) {
+            return path.substr(path.lastIndexOf("/") + 1);
+        }
+
+        function analyseDirInfo(dir) {
+            if (!dir.children)
+                dir.children = [];
+
+            return function(d) {
+                var f = {
+                    name : getName(d.path),
+                    path : d.path,
+                    level : dir.level + 1,
+                    is_dir : d.is_dir
+                };
+
+                if (d.is_dir) {
+                    appendToRT({path : d.path, f : f});
                 }
-                progress.max(progress.max() + data._json.contents.length);
-                data._json.contents
-                    && data._json.contents.forEach(analyseDirInfo(dir));
-                progress.step()
-                        .label(progress.pos() + " of " + progress.max());
+                else {
+                    prgInc();
+                    f.orignsize = d.size || 0;
+                    f.size = d.bytes || 0;
+                }
+                dir.children.push(f);
+                calc(dirTree);
             }
         }
 
-        function getName(path) {
-            return path.substr(path.lastIndexOf("/") + 1);
+        function resetWaiting() {
+            if (loopThr) {
+                clearTimeout(loopThr);
+                loopThr = null;
+            }
+            showWaiter();
+            loopThr = setTimeout(function(){
+                pause = false;
+                hideWaiter();
+                appendToRT();
+                loopThr = null;
+            }, 3000);
+        }
+
+        function parseDirInfo(dir) {
+            return function(error, data) {
+                if (error) {
+                    //send error
+                    if (error.status == 429) {
+                        pause = true;
+                        insertDataBack(dir);
+                        resetWaiting();
+                    }
+                    logError(error);
+                    return;
+                }
+
+                //move progress bar
+                prgMax(data._json.contents.length);
+
+                data._json.contents
+                && data._json.contents.forEach(analyseDirInfo(dir));
+
+                //inc position progress bar
+                prgInc();
+            }
         }
 
         function convertSize(size) {
@@ -194,33 +243,10 @@
             return a[0] * sizes[a[1]];
         }
 
-        function analyseDirInfo(dir) {
-            return function(d) {
-                var f = {
-                    name : getName(d.path),
-                    path : d.path,
-                    level : dir.level + 1
-                };
-                dir.children.push(f);
-
-                if (d.is_dir) {
-                    f.children = [];
-                    appendToRT({path : d.path, f : f});
-                }
-                else {
-                    progress.step()
-                            .label(progress.pos() + " of " + progress.max());
-                    f.orignsize = d.size;
-                    f.size = d.bytes;
-                }
-                update();
-            }
-        }
-
         function singOut() {
             client.signOut(function(error) {
                 if (error) {
-                    log(error);
+                    log("error", error);
                     return;
                 }
                 d3.select("#singOut")
@@ -231,11 +257,13 @@
         }
     }
 
+    init();
+
     // http://bl.ocks.org/mbostock/4348373
 
     var w = window.innerWidth,
         h = window.innerHeight,
-        radius = Math.min(w, h) / 2,
+        radius,
         path;
 
     d3.select("#run").on("click", function() {
@@ -244,11 +272,15 @@
         !pause && doStart && doStart();
     });
 
-    var x = d3.scale.linear()
-            .range([0, PI2]);
+    function showWaiter() {
+        d3.select("#run").style("display", "none");
+        d3.select("#wtr").style("display", null);
+    }
 
-    var y = d3.scale.sqrt()
-            .range([0, radius]);
+    function hideWaiter() {
+        d3.select("#run").style("display", null);
+        d3.select("#wtr").style("display", "none");
+    }
 
     var color = d3.scale.category20c();
 
@@ -263,11 +295,30 @@
     progress.textPosition("middle")
         .attr("transform", "translate(" + [0, h - progress.height()] + ")");
 
+    radius = Math.min(w, h - progress.height() - 10) / 2;
+
+    var x = d3.scale.linear()
+            .range([0, PI2]);
+
+    var y = d3.scale.sqrt()
+            .range([0, radius]);
+
     svg = svg.append("g")
-            .attr("transform", "translate(" + w / 2 + "," + (h / 2 + 10) + ")");
+            .attr("transform", "translate(" + [(w / 2), ((h - progress.height() - 10) / 2) + 5] + ")");
 
     var partition = d3.layout.partition()
-            .value(function(d) { return d.size; });
+            .value(function(d) { return d.size || 0; });
+
+    function calc(data) {
+        if (!loopSnd) {
+            var clone = JSON.parse(JSON.stringify(data));
+            loopSnd = setTimeout(function() {
+                dirTreeDraw = partition(clone).filter(filter);
+                update();
+                loopSnd = null;
+            }, to);
+        }
+    }
 
     var arc = d3.svg.arc()
         .startAngle(function(d) { return Math.max(0, Math.min(PI2, x(d.x))); })
@@ -275,15 +326,13 @@
         .innerRadius(function(d) { return Math.max(0, y(d.y)); })
         .outerRadius(function(d) { return Math.max(0, y(d.y + d.dy)); });
 
-    var tf = d3.format(',00');
+    var tf = d3.format('.2f');
 
     function formatSize(d) {
         var s = sizes.B,
             af = " B";
 
-        if (d < sizes.KB) {
-        }
-        else if (d < sizes.MB) {
+        if (d < sizes.MB) {
             s = sizes.KB;
             af = " KB";
         }
@@ -304,7 +353,7 @@
             af = " PB";
         }
 
-        return tf(d/s) + af;
+        return tf((d/s) || 0) + af;
     }
 
     var tooltip = d3.helper.tooltip()
@@ -316,7 +365,7 @@
                 "Name: <b>",
                 d.name,
                 "</b><br/>Path: <b>",
-                d.path.replace(d.name, ""),
+                d.path,
                 "</b><br/>Size: <b>",
                 formatSize(d.value),
                 "</b><br/>"
@@ -330,7 +379,7 @@
 
     function fill(d) {
         var k = (d.children ? d : d.parent).path;
-        return d == dirTree.children[0] || d == dirTree.children[0].children[0] ? toRgba("#444", .1) : color(k);
+        return d.path == "/.FreeSpace" ? toRgba("#444", .1) : color(k);
     }
 
     function key(d) {
@@ -338,20 +387,23 @@
     }
 
     function filter(d) {
-        return selected
-            ? (d.path.indexOf(selected.path) == 0 || d == selected.parent)
-            : d.level < 4;
+        return true;
     }
 
     function update() {
         path = svg.selectAll("path")
-            .data(partition(dirTree).filter(filter), key);
+            .data(dirTreeDraw, key);
 
-        path.enter()
+        var paths = path.enter()
             .append("path")
             .style("fill", fill)
             .call(tooltip)
-            .on("click", click);
+            .filter(function(d) {
+                return d.is_dir;
+            })
+            .on("click", click)
+            .attr("class", "isdir")
+            ;
 
         path.exit().remove();
 
@@ -362,7 +414,9 @@
         path.transition()
             .duration(750)
             .attrTween("d", arcTween(d))
-            .each("end", update);
+            .each("end", function() {
+                calc(dirTree);
+            });
     }
 
     // Interpolate the scales!
