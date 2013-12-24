@@ -22,8 +22,13 @@
 <script src="tooltip.js" charset="utf-8"></script>
 <script src="progressbar.js" charset="utf-8"></script>
 <script src="//cdnjs.cloudflare.com/ajax/libs/dropbox.js/0.10.2/dropbox.min.js"></script>
+<script src="environment.js"></script>
+<script src="loader.js"></script>
+
 <script>
     'use strict';
+
+    var dbkey = "7b49k68tq0ph77g";
 
     var DEBUG = false;
 
@@ -49,17 +54,35 @@
             , params = {}
             , selected
             , doStart
-            , pause
-            , loop
             , loopSnd
-            , loopThr
             , to = 10
-            , seq = 0
             ;
+    var client;
 
-    function logError(error) {
-        log("error", error);
-    }
+
+    var option = {
+        incBar : prgInc,
+        setMaxBar : prgMax,
+        getMaxBar : prgMax,
+        onBeginWaiting : showWaiter,
+        onEndWaiting : hideWaiter,
+        onWork : function(data) {
+            calc(data);
+        },
+        onSingIn : function(data) {
+            d3.select("#singOut")
+                .style("display", null)
+                .on("click", singOut);
+            d3.select("#userName")
+                .text(data.name)
+        },
+        onSingOut : function() {
+            d3.select("#singOut")
+                    .style("display", "none");
+            d3.select("#userName")
+                    .text("");
+        }
+    };
 
     function prgInc() {
         progress.step()
@@ -67,14 +90,10 @@
     }
 
     function prgMax(max) {
-        progress.max(progress.max() + max);
-    }
-
-    function log(label, data) {
-        if (arguments.length < 2)
-            console.log(label);
-        else
-            console.log(label, data);
+        if (arguments.length < 1)
+            return progress.max();
+        progress.max(max);
+        return max;
     }
 
     hideWaiter();
@@ -85,186 +104,9 @@
     });
 
     function init() {
-
-        var client = new Dropbox.Client({
-            key: "7b49k68tq0ph77g",
-            rememberUser: true
-        });
-
-        client.authDriver(new Dropbox.AuthDriver.Redirect({
-            receiverUrl: redirectUrl
-        }));
-
-        client.authenticate(function(error, client) {
-            if (error) {
-                log("authError", error);
-                return;
-            }
-
-            getUserInfo(client);
-        });
-
-
-        function getUserInfo(client) {
-            client.getUserInfo(parseUserInfo);
-        }
-
-        function parseUserInfo(error, data) {
-            if (error) {
-                logError(error);
-                return;
-            }
-
-            d3.select("#singOut")
-                    .style("display", null)
-                    .on("click", singOut);
-            d3.select("#userName")
-                    .text(data.name);
-
-            params.root = decodeURIComponent(params.root || "/");
-
-            selected = dirTree = {
-                name : "",
-                path : params.root,
-                children : [],
-                level : 0,
-                is_dir : true,
-                size : data.quota
-            };
-
-            if (params.root == "/")
-                dirTree.children = [{
-                    name : "Free Space",
-                    path : "/.FreeSpace",
-                    size : data.quota - data.usedQuota,
-                    level : 1
-                }];
-
-            progress.max(0);
-
-            getData(params.root, dirTree);
-        }
-
-        function appendToRT(item) {
-            item && (item.f.seqid = (++seq)) && requestTurn.push(item);
-            if (pause || loop)
-                return;
-            loop = setTimeout(function run() {
-                var d = !pause;
-
-                d && (d = requestTurn.shift());
-
-                if (d) {
-                    getData(d.path, d.f);
-                    loop = setTimeout(run, to);
-                }
-                else {
-                    clearTimeout(loop);
-                    loop = null;
-                }
-            }, to);
-        }
-
-        function insertDataBack(dir) {
-            requestTurn.splice(0, 0, {path : dir.path, f : dir});
-            requestTurn.sort(function(a, b) {
-                    return d3.ascending(a.f.seqid, b.f.seqid);
-            });
-        }
-
-        doStart = appendToRT;
-
-        function getData(path, dir) {
-            client.metadata(path, {readDir : true}, parseDirInfo(dir));
-        }
-
-        function getName(path) {
-            return path.substr(path.lastIndexOf("/") + 1);
-        }
-
-        function analyseDirInfo(dir) {
-            if (!dir.children)
-                dir.children = [];
-
-            return function(d) {
-                var f = {
-                    name : getName(d.path),
-                    path : d.path,
-                    level : dir.level + 1,
-                    is_dir : d.is_dir
-                };
-
-                if (d.is_dir) {
-                    appendToRT({path : d.path, f : f});
-                }
-                else {
-                    prgInc();
-                    f.orignsize = d.size || 0;
-                    f.size = d.bytes || 0;
-                }
-                dir.children.push(f);
-                calc(dirTree);
-            }
-        }
-
-        function resetWaiting() {
-            if (loopThr) {
-                clearTimeout(loopThr);
-                loopThr = null;
-            }
-            showWaiter();
-            loopThr = setTimeout(function(){
-                pause = false;
-                hideWaiter();
-                appendToRT();
-                loopThr = null;
-            }, 3000);
-        }
-
-        function parseDirInfo(dir) {
-            return function(error, data) {
-                if (error) {
-                    //send error
-                    if (error.status == 429) {
-                        pause = true;
-                        insertDataBack(dir);
-                        resetWaiting();
-                    }
-                    logError(error);
-                    return;
-                }
-
-                //move progress bar
-                prgMax(data._json.contents.length);
-
-                data._json.contents
-                && data._json.contents.forEach(analyseDirInfo(dir));
-
-                //inc position progress bar
-                prgInc();
-            }
-        }
-
-        function convertSize(size) {
-            var a = size.split(" ");
-            return a[0] * sizes[a[1]];
-        }
-
-        function singOut() {
-            client.signOut(function(error) {
-                if (error) {
-                    log("error", error);
-                    return;
-                }
-                d3.select("#singOut")
-                    .style("display", "none");
-                d3.select("#userName")
-                    .text("");
-            });
-        }
+        client = DropBoxClient(option);
+        client.singIn(dbkey, redirectUrl);
     }
-
-    init();
 
     // http://bl.ocks.org/mbostock/4348373
 
@@ -274,9 +116,8 @@
         path;
 
     d3.select("#run").on("click", function() {
-        pause = !pause;
-        this.innerText = pause ? "Start" : "Pause";
-        !pause && doStart && doStart();
+        client.isPaused() ? client.resume() : client.pause();
+        this.innerText = client.isPaused() ? "Start" : "Pause";
     });
 
     function showWaiter() {
@@ -316,10 +157,15 @@
     var partition = d3.layout.partition()
             .value(function(d) { return d.size || 0; });
 
+    function calcCsize(dir, size) {
+
+    }
+
     function calc(data) {
         if (!loopSnd) {
             var clone = JSON.parse(JSON.stringify(data));
             loopSnd = setTimeout(function() {
+
                 dirTreeDraw = partition(clone).filter(filter);
                 update();
                 loopSnd = null;
@@ -374,7 +220,7 @@
                 "</b><br/>Path: <b>",
                 d.path,
                 "</b><br/>Size: <b>",
-                formatSize(d.value),
+                formatSize(d.csize),
                 "</b><br/>"
             ].join("")
         })
@@ -399,14 +245,16 @@
 
     function update() {
         path = svg.selectAll("path")
-            .data(dirTreeDraw, key);
+            .data(dirTreeDraw.filter(function(d) {
+                return true;//d.csize > 0;
+            }), key);
 
         var paths = path.enter()
             .append("path")
             .style("fill", fill)
             .call(tooltip)
             .filter(function(d) {
-                return d.is_dir;
+                return d.isDir;
             })
             .on("click", click)
             .attr("class", "isdir")
@@ -422,7 +270,7 @@
             .duration(750)
             .attrTween("d", arcTween(d))
             .each("end", function() {
-                calc(dirTree);
+                calc(client.getDirTree());
             });
     }
 
@@ -438,5 +286,7 @@
                     : function(t) { x.domain(xd(t)); y.domain(yd(t)).range(yr(t)); return arc(d); };
         };
     }
+
+    init();
 
 </script>
