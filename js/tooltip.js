@@ -21,7 +21,7 @@ d3.helper.tooltip = d3.helper.tooltip || function(){
             tooltipDiv.html(
                 typeof text === "function"
                     ? text(d, i)
-                    : typeof text != "undefined" || typeof text != null
+                    : typeof text !== "undefined"
                     ? text
                     : ''
             );
@@ -46,7 +46,7 @@ d3.helper.tooltip = d3.helper.tooltip || function(){
                 } else value = attrs[key][1];
                 tooltipDiv.attr(name, value);
             }
-            tooltipDiv.attr("class", tooltipDiv.attr("class") + " tooltip");
+            tooltipDiv.classed("tooltip", true);
 
             for (key in styles) {
                 if (!styles.hasOwnProperty(key))

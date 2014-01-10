@@ -2,39 +2,71 @@
 <head>
     <meta charset="utf-8">
     <link rel="icon" type="image/png" href="favicon.png" />
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="css/style.css"/>
+    <link rel="stylesheet" href="css/db.css"/>
     <title>SizeViewer</title>
 </head>
 <body>
 <header>
     <div class="toolbar">
-        <button id="run">Pause</button>
-        <span id="wtr">Waiting for reset of requests limit. In 3 seconds ...</span>
+        <button id="run" style="display: none">Pause</button>
+        <span id="wtr">Waiting for ...</span>
     </div>
     <div class="userInfo">
         <span id="userName"></span>
         <button id="singOut" style="display: none">Sing out</button>
     </div>
 </header>
+<section id="topscreen">
+    <div>
+        <ul>
+            <li class="row">
+                <div class="about">
+                    <img src="favicon.png" class="icon" style="width: 122px"/>
+                    <div>
+                        <h1>SizeViewer</h1>
+                        <p>
+                            <br/>
+                            Service to view the used file space in a cloud file storage.
+                            <hr/>
+                            Powered by <a href="http://d3js.org">D3.js</a>.<br/>
+                            Created by <a href="http://artzub.com">Artem Zubkov</a>.
+                        </p>
+                    </div>
+                </div>
+            </li>
+            <li><a href="?cloud=db"><img src="images/db.ico" alt="Dropbox"/><h1>DropBox</h1></a></li>
+            <li><a href="?cloud=gd"><img src="images/gd.ico" alt="GoogleDrive"/><h1>Google Drive</h1></a></li>
+            <li><a href="?cloud=yad"><img src="images/yad.png" alt="YandexDisk"/><h1>Yandex Disk</h1></a></li>
+            <li class="row" style="text-align: center"><span id="hidets" style="display: none">Close</span></li>
+        </ul>
+    </div>
+    <span id="showts">about</span>
+</section>
 <section id="canvas"></section>
 
 <script src="//rawgithub.com/mbostock/d3/master/d3.min.js" charset="utf-8"></script>
-<script src="tooltip.js" charset="utf-8"></script>
-<script src="progressbar.js" charset="utf-8"></script>
+<script src="js/tooltip.js" charset="utf-8"></script>
+<script src="js/progressbar.js" charset="utf-8"></script>
 <script src="//cdnjs.cloudflare.com/ajax/libs/dropbox.js/0.10.2/dropbox.min.js"></script>
-<script src="environment.js"></script>
-<script src="loader.js"></script>
+<script src="//rawgithub.com/artzub/JSONP/master/JSONP.js" charset="utf-8"></script>
+<script src="js/environment.js"></script>
+<script src="js/loader.js"></script>
 
 <script>
     'use strict';
 
+    var yakey = "284cdcf7b84346e39b7982985649b689";
+
     var dbkey = "7b49k68tq0ph77g";
+
+    var gakey = "601600490264-mtpipnm40ojl25ki9flt12arrqlnhm4d.apps.googleusercontent.com";
 
     var DEBUG = false;
 
     var redirectUrl = DEBUG
             ? "http://localhost:63342/dbsv/index.html"
-            : "https://artzub.com/d3/dbsv";
+            : "https://artzub.com/d3/dbsv/?cloud=db";
 
     var PI2 = Math.PI * 2,
         sizes = {
@@ -72,7 +104,7 @@
         onSingIn : function(data) {
             d3.select("#singOut")
                 .style("display", null)
-                .on("click", singOut);
+                .on("click", client.singOut);
             d3.select("#userName")
                 .text(data.name)
         },
@@ -81,7 +113,8 @@
                     .style("display", "none");
             d3.select("#userName")
                     .text("");
-        }
+        },
+        startImmediately : true
     };
 
     function prgInc() {
@@ -96,16 +129,40 @@
         return max;
     }
 
-    hideWaiter();
-
-    document.location.hash.replace("#", "").split("&").forEach(function(d) {
+    document.location.search.replace("?", "").split("&").forEach(function(d) {
         d = d.split('=');
         params[d[0]] = d[1];
     });
 
+    option.root = params.root;
+
+    function hideStart() {
+        progress.style("display", null);
+        d3.select("#topscreen").classed("hide", true);
+        hideWaiter();
+    }
+
     function init() {
-        client = DropBoxClient(option);
-        client.singIn(dbkey, redirectUrl);
+        d3.select("#wtr").style("display", "none");
+        progress.style("display", "none");
+
+        if (params.cloud == "db") {
+            hideStart();
+            client = DropBoxClient(option);
+            client.singIn(dbkey, redirectUrl);
+        }
+        else if (params.cloud == 'yad') {
+            hideStart();
+            client = YandexDiskClient(option);
+            client.singIn(yakey);
+        }
+        else if (params.cloud == 'gd') {
+            hideStart();
+            GoogleDriveClient(function() {
+                client = GoogleDriveClient(option);
+                client.singIn(gakey);
+            });
+        }
     }
 
     // http://bl.ocks.org/mbostock/4348373
@@ -140,8 +197,26 @@
         .call(d3.helper.progressbar)
         .width(w)
     ;
+
     progress.textPosition("middle")
         .attr("transform", "translate(" + [0, h - progress.height()] + ")");
+
+    function resize() {
+        w = window.innerWidth;
+        h = window.innerHeight;
+
+        svg.attr("width", w)
+           .attr("height", h);
+        progress.width(w)
+                .attr("transform", "translate(" + [0, h - progress.height()] + ")");
+        radius = Math.min(w, h - progress.height() - 10) / 2;
+        y.range([0, radius]);
+        group.attr("transform", "translate(" + [(w / 2), ((h - progress.height() - 10) / 2) + 5] + ")");
+        if (client && client.getDirTree)
+            calc(client.getDirTree());
+    }
+
+    d3.select(window).on("resize", resize);
 
     radius = Math.min(w, h - progress.height() - 10) / 2;
 
@@ -151,15 +226,11 @@
     var y = d3.scale.sqrt()
             .range([0, radius]);
 
-    svg = svg.append("g")
+    var group = svg.append("g")
             .attr("transform", "translate(" + [(w / 2), ((h - progress.height() - 10) / 2) + 5] + ")");
 
     var partition = d3.layout.partition()
             .value(function(d) { return d.size || 0; });
-
-    function calcCsize(dir, size) {
-
-    }
 
     function calc(data) {
         if (!loopSnd) {
@@ -214,14 +285,34 @@
         .spaceWidth(w)
         .spaceHeight(h)
         .text(function(d) {
+            var img = [];
+            switch (params.cloud) {
+                case "db":
+                    img = [
+                        "<img src='https://www.dropbox.com/static/images/icons/icon_spacer.gif' class='",
+                        d.icon,
+                        "'>"
+                    ];
+                    break;
+                case "gd":
+                    img = [
+                        "<img src='",
+                        d.icon,
+                        "' class='icon'>"
+                    ];
+                    break;
+            }
             return [
-                "Name: <b>",
+                img.join(""),
+                "<div style='overflow: hidden'>Name: <b>",
                 d.name,
                 "</b><br/>Path: <b>",
                 d.path,
                 "</b><br/>Size: <b>",
-                formatSize(d.csize),
-                "</b><br/>"
+                formatSize(d.value),
+                d.type && d.type.length > 0 ? "</b><br/>MimeType: <b>" : "",
+                d.type,
+                "</b><br/></div>"
             ].join("")
         })
     ;
@@ -235,30 +326,40 @@
         return d.path == "/.FreeSpace" ? toRgba("#444", .1) : color(k);
     }
 
+    function disSet(d) {
+        return filter(d) ? null : "none";
+    }
+
     function key(d) {
-        return d.path;
+        return d.seqid;
     }
 
     function filter(d) {
-        return true;
+        return !selected || (
+            d.seqid == selected.seqid ||
+            (selected.parent && (d.seqid == selected.parent.seqid || (
+                selected.parent.parent && d.seqid == selected.parent.parent.seqid)
+            )) ||
+            d.path.indexOf(selected.path) == 0
+        );
     }
 
     function update() {
-        path = svg.selectAll("path")
-            .data(dirTreeDraw.filter(function(d) {
-                return true;//d.csize > 0;
-            }), key);
+        path = group.selectAll("path")
+            .data(dirTreeDraw.filter(filter), key);
 
-        var paths = path.enter()
+        path.enter()
             .append("path")
-            .style("fill", fill)
+            .style({
+                fill: fill
+            })
             .call(tooltip)
             .filter(function(d) {
                 return d.isDir;
             })
             .on("click", click)
             .attr("class", "isdir")
-            ;
+        ;
 
         path.exit().remove();
 
@@ -271,8 +372,18 @@
             .attrTween("d", arcTween(d))
             .each("end", function() {
                 calc(client.getDirTree());
-            });
+            })
+        ;
     }
+
+    function hidets() {
+        d3.select("#topscreen").classed("hide", true);
+    }
+
+    d3.select("#showts").on("click", function() {
+        d3.select("#topscreen").on("click", hidets).classed("hide", false);
+        d3.select("#hidets").style("display", null).on("click", hidets);
+    });
 
     // Interpolate the scales!
     function arcTween(d) {
@@ -280,6 +391,8 @@
                 yd = d3.interpolate(y.domain(), [d.y, 1]),
                 yr = d3.interpolate(y.range(), [d.y ? 20 : 0, radius]);
         selected = d;
+        if (d.seqid == -2)
+            selected = null;
         return function(d, i) {
             return i
                     ? function(t) { return arc(d); }

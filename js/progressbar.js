@@ -56,6 +56,9 @@ d3.helper.progressbar = function(selection) {
             if (!arguments.length) return pos;
             pos = parseInt(arguments[0]);
 
+            if (pos > max)
+                pos = max;
+
             var ww = (w - pp.x * 2) * pos/(max || 1);
 
             if (ww - pp.x < displayLength(label.node())) {
