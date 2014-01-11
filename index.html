@@ -22,7 +22,7 @@
         <ul>
             <li class="row">
                 <div class="about">
-                    <img src="favicon.png" class="icon" style="width: 122px"/>
+                    <img src="https://raw2.github.com/artzub/dbsv/master/favicon.png" class="icon" style="width: 122px"/>
                     <div>
                         <h1>SizeViewer</h1>
                         <p>
@@ -35,9 +35,9 @@
                     </div>
                 </div>
             </li>
-            <li><a href="?cloud=db"><img src="images/db.ico" alt="Dropbox"/><h1>DropBox</h1></a></li>
-            <li><a href="?cloud=gd"><img src="images/gd.ico" alt="GoogleDrive"/><h1>Google Drive</h1></a></li>
-            <li><a href="?cloud=yad"><img src="images/yad.png" alt="YandexDisk"/><h1>Yandex Disk</h1></a></li>
+            <li><a href="?cloud=db"><img src="https://raw2.github.com/artzub/dbsv/master/images/db.ico" alt="Dropbox"/><h1>DropBox</h1></a></li>
+            <li><a href="?cloud=gd"><img src="https://raw2.github.com/artzub/dbsv/master/images/gd.ico" alt="GoogleDrive"/><h1>Google Drive</h1></a></li>
+            <li><a href="?cloud=yad"><img src="https://raw2.github.com/artzub/dbsv/master/images/yad.png" alt="YandexDisk"/><h1>Yandex Disk</h1></a></li>
             <li class="row" style="text-align: center"><span id="hidets" style="display: none">Close</span></li>
         </ul>
     </div>
@@ -46,19 +46,19 @@
 <section id="canvas"></section>
 
 <script src="//rawgithub.com/mbostock/d3/master/d3.min.js" charset="utf-8"></script>
-<script src="js/tooltip.js" charset="utf-8"></script>
-<script src="js/progressbar.js" charset="utf-8"></script>
+<script src="//rawgithub.com/artzub/dbsv/master/js/tooltip.js" charset="utf-8"></script>
+<script src="//rawgithub.com/artzub/dbsv/master/js/progressbar.js" charset="utf-8"></script>
 <script src="//cdnjs.cloudflare.com/ajax/libs/dropbox.js/0.10.2/dropbox.min.js"></script>
 <script src="//rawgithub.com/artzub/JSONP/master/JSONP.js" charset="utf-8"></script>
-<script src="js/environment.js"></script>
-<script src="js/loader.js"></script>
+<script src="//rawgithub.com/artzub/dbsv/master/js/environment.js"></script>
+<script src="//rawgithub.com/artzub/dbsv/master/js/loader.js"></script>
 
 <script>
     'use strict';
 
     var yakey = "284cdcf7b84346e39b7982985649b689";
 
-    var dbkey = "7b49k68tq0ph77g";
+    var dbkey = "hf2l7lg3omgwze7";
 
     var gakey = "601600490264-mtpipnm40ojl25ki9flt12arrqlnhm4d.apps.googleusercontent.com";
 
@@ -381,7 +381,7 @@
     }
 
     d3.select("#showts").on("click", function() {
-        d3.select("#topscreen").on("click", hidets).classed("hide", false);
+        d3.select("#topscreen").classed("hide", false);
         d3.select("#hidets").style("display", null).on("click", hidets);
     });
 
