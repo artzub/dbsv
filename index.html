@@ -12,6 +12,14 @@
         <button id="run" style="display: none">Pause</button>
         <span id="wtr">Waiting for ...</span>
     </div>
+    <nav style="display: none">
+        <ul>
+            <li>Mode:
+                <ul id="drawMode">
+                </ul>
+            </li>
+        </ul>
+    </nav>
     <div class="userInfo">
         <span id="userName"></span>
         <button id="singOut" style="display: none">Sing out</button>
@@ -22,7 +30,7 @@
         <ul>
             <li class="row">
                 <div class="about">
-                    <img src="https://raw2.github.com/artzub/dbsv/master/favicon.png" class="icon" style="width: 122px"/>
+                    <img src="favicon.png" class="icon" style="width: 122px"/>
                     <div>
                         <h1>SizeViewer</h1>
                         <p>
@@ -45,15 +53,34 @@
 </section>
 <section id="canvas"></section>
 
-<script src="//rawgithub.com/mbostock/d3/master/d3.min.js" charset="utf-8"></script>
-<script src="//rawgithub.com/artzub/dbsv/master/js/tooltip.js" charset="utf-8"></script>
-<script src="//rawgithub.com/artzub/dbsv/master/js/progressbar.js" charset="utf-8"></script>
+<script src="//cdnjs.cloudflare.com/ajax/libs/d3/3.3.13/d3.min.js" charset="utf-8"></script>
+<script src="js/tooltip.js" charset="utf-8"></script>
+<script src="js/progressbar.js" charset="utf-8"></script>
 <script src="//cdnjs.cloudflare.com/ajax/libs/dropbox.js/0.10.2/dropbox.min.js"></script>
-<script src="//rawgithub.com/artzub/JSONP/master/JSONP.js" charset="utf-8"></script>
-<script src="//rawgithub.com/artzub/dbsv/master/js/environment.js"></script>
-<script src="//rawgithub.com/artzub/dbsv/master/js/loader.js"></script>
+<script src="//artzub.com/ghv/js/jsonp.js" charset="utf-8"></script>
+<!--<script src="//rawgithub.com/artzub/dbsv/master/js/environment.js"></script>-->
+<script src="js/loader.js"></script>
 
 <script>
+    function log(label, data) {
+        if (arguments.length < 2)
+            console.log(label);
+        else
+            console.log(label, data);
+    }
+
+    function logError(error) {
+        log("error", error);
+    }
+
+    (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+        (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+            m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+    })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+    ga('create', 'UA-28343295-9', 'artzub.com');
+    ga('send', 'pageview');
+
     'use strict';
 
     var yakey = "284cdcf7b84346e39b7982985649b689";
@@ -80,14 +107,21 @@
     sizes.TB = sizes.GB * 1024;
     sizes.PB = sizes.TB * 1024;
 
+    var drawMode = {
+        partition : 0,
+        pack : 1
+    };
+
     var dirTree = {}
-            , dirTreeDraw = {}
+            , dirTreeDraw = []
+            , dirTreePack = []
             , requestTurn = []
             , params = {}
             , selected
             , doStart
             , loopSnd
             , to = 10
+            , mode = drawMode.partition
             ;
     var client;
 
@@ -136,34 +170,71 @@
 
     option.root = params.root;
 
+    switch (params.cloud) {
+        case "db":
+        case "yad":
+        case "gd":
+            hideStart();
+            break;
+    }
+
     function hideStart() {
-        progress.style("display", null);
+        //progress.style("display", null);
         d3.select("#topscreen").classed("hide", true);
         hideWaiter();
     }
 
     function init() {
         d3.select("#wtr").style("display", "none");
-        progress.style("display", "none");
+        //progress.style("display", "none");
 
         if (params.cloud == "db") {
-            hideStart();
             client = DropBoxClient(option);
             client.singIn(dbkey, redirectUrl);
         }
         else if (params.cloud == 'yad') {
-            hideStart();
             client = YandexDiskClient(option);
             client.singIn(yakey);
         }
         else if (params.cloud == 'gd') {
-            hideStart();
             GoogleDriveClient(function() {
                 client = GoogleDriveClient(option);
                 client.singIn(gakey);
             });
         }
     }
+
+    function clickMode(ul) {
+        return function(d) {
+            var item = d3.select(this);
+            ul.selectAll("span").classed("checked", false);
+            item.classed("checked", true);
+
+            if (mode != d.value) {
+                client &&
+                client.getDirTree &&
+                calc(client.getDirTree());
+            }
+            mode = d.value;
+        };
+    }
+
+    function name(d) {
+        return d.name;
+    }
+
+    d3.select("#drawMode")
+        .selectAll("li")
+        .data([{name : "Partition", value: drawMode.partition}, {name : "Pack", value: drawMode.pack}])
+        .enter()
+        .append('li')
+        .append('span')
+        .text(name)
+        .on('click', clickMode(d3.select("#drawMode")))
+        .classed('checked', function(d) {
+            return d.value == mode;
+        })
+    ;
 
     // http://bl.ocks.org/mbostock/4348373
 
@@ -196,6 +267,7 @@
     var progress = svg.append("g")
         .call(d3.helper.progressbar)
         .width(w)
+        .style("display", params.cloud && params.cloud.length > 0 ? null : "none")
     ;
 
     progress.textPosition("middle")
@@ -211,6 +283,9 @@
                 .attr("transform", "translate(" + [0, h - progress.height()] + ")");
         radius = Math.min(w, h - progress.height() - 10) / 2;
         y.range([0, radius]);
+
+        pack.size([radius * 2 , radius * 2 ]);
+
         group.attr("transform", "translate(" + [(w / 2), ((h - progress.height() - 10) / 2) + 5] + ")");
         if (client && client.getDirTree)
             calc(client.getDirTree());
@@ -226,19 +301,49 @@
     var y = d3.scale.sqrt()
             .range([0, radius]);
 
+    var xp = d3.scale.linear()
+            .range([0, radius * 2]);
+
+    var yp = d3.scale.sqrt()
+            .range([0, radius * 2]);
+
     var group = svg.append("g")
             .attr("transform", "translate(" + [(w / 2), ((h - progress.height() - 10) / 2) + 5] + ")");
 
+    var filesInfo = svg.append("g");
+
     var partition = d3.layout.partition()
             .value(function(d) { return d.size || 0; });
+
+    var pack = d3.layout.pack()
+            .size([radius * 2, radius * 2])
+            .padding(.5)
+            .value(function(d) { return d.size || 0; });
+
+    function select(d) {
+        return function(a, b) {
+            return a || (b.id == d.id ? b : null);
+        }
+    }
 
     function calc(data) {
         if (!loopSnd) {
             var clone = JSON.parse(JSON.stringify(data));
             loopSnd = setTimeout(function() {
 
-                dirTreeDraw = partition(clone).filter(filter);
+                dirTreeDraw =
+                    mode == drawMode.partition ?
+                        partition(clone) :
+                        pack.nodes(clone);
+
                 update();
+
+                /*if (selected) {
+                    var temp = dirTreeDraw.reduce(select(selected), null);
+                    selected = null;
+                    click(temp);
+                }*/
+
                 loopSnd = null;
             }, to);
         }
@@ -249,6 +354,19 @@
         .endAngle(function(d) { return Math.max(0, Math.min(PI2, x(d.x + d.dx))); })
         .innerRadius(function(d) { return Math.max(0, y(d.y)); })
         .outerRadius(function(d) { return Math.max(0, y(d.y + d.dy)); });
+
+    var arcCircle = function(d) {
+        var r = d.r
+            , x = d.x - radius
+            , y = d.y - radius
+            ;
+        return circle(r, x, y);
+    };
+
+    function circle(r, x, y) {
+        return "M " + x + " " + y + "m -" + r + ", 0 a " + [r,r] + " 0 1,1 " + (r * 2) + ",0 a " + [r,r] + " 0 1,1 -" + (r * 2) + ",0";
+        //return "M0," + r + "A" + r + "," + r + " 0 1,1 0," + -r + "A" + r + "," + r + " 0 1,1 0," + r + "Z";
+    }
 
     var tf = d3.format('.2f');
 
@@ -322,7 +440,7 @@
     }
 
     function fill(d) {
-        var k = (d.children ? d : d.parent).path;
+        var k = d.seqid == -2 ? "~root~" : (d.children ? d : d.parent).path;
         return d.path == "/.FreeSpace" ? toRgba("#444", .1) : color(k);
     }
 
@@ -331,11 +449,11 @@
     }
 
     function key(d) {
-        return d.seqid;
+        return "path" + d.seqid;
     }
 
     function filter(d) {
-        return !selected || (
+        return !selected || mode == drawMode.pack || (
             d.seqid == selected.seqid ||
             (selected.parent && (d.seqid == selected.parent.seqid || (
                 selected.parent.parent && d.seqid == selected.parent.parent.seqid)
@@ -344,12 +462,17 @@
         );
     }
 
+    function sortPath(a, b) {
+        return d3.ascending(a.depth, b.depth);
+    }
+
     function update() {
         path = group.selectAll("path")
             .data(dirTreeDraw.filter(filter), key);
 
-        path.enter()
-            .append("path")
+        var ps = path.enter()
+            .append("path");
+        ps.attr("id", key)
             .style({
                 fill: fill
             })
@@ -361,19 +484,35 @@
             .attr("class", "isdir")
         ;
 
+        ps.append("text").text(name);
+
         path.exit().remove();
 
-        path.attr("d", arc);
+        group.classed("packMode", mode == drawMode.pack);
+
+        mode == drawMode.pack && path.sort(sortPath);
+
+        path.attr("d", mode == drawMode.partition ? arc : arcCircle);
     }
 
     function click(d) {
-        path.transition()
-            .duration(750)
-            .attrTween("d", arcTween(d))
-            .each("end", function() {
-                calc(client.getDirTree());
-            })
-        ;
+        d3.event && d3.event.stopPropagation();
+        if (mode == drawMode.partition) {
+            path/*.selectAll("path")*/.transition()
+                .duration(750)
+                .attrTween("d", arcTween(d))
+                .each("end", function() {
+                    calc(client.getDirTree());
+                    //update();
+                })
+            ;
+        } else if (mode == drawMode.pack) {
+            zoom(selected && d.seqid == selected.seqid ? dirTreeDraw[0] : d);
+        }
+    }
+
+    function test() {
+        calc(client.getDirTree());
     }
 
     function hidets() {
@@ -398,6 +537,30 @@
                     ? function(t) { return arc(d); }
                     : function(t) { x.domain(xd(t)); y.domain(yd(t)).range(yr(t)); return arc(d); };
         };
+    }
+
+    function zoom(d) {
+        selected = d;
+
+        if (d.seqid == -2)
+            selected = null;
+
+        var k = radius / d.r;
+        xp.domain([d.x - d.r, d.x + d.r]);
+        yp.domain([d.y - d.r, d.y + d.r]);
+
+        /*var xd = d3.interpolate(x.domain(), [d.x - d.r, d.x + d.r]),
+            yd = d3.interpolate(y.domain(), [d.y - d.r, d.y + d.r]),
+            yr = d3.interpolate(y.range(), [d.y ? 20 : 0, radius]);*/
+
+        //return function (d, i) {
+            d3.selectAll("path").transition()
+                .duration(750)
+                .attr("d", selected ? function(d) {
+                    return circle(k * d.r, xp(d.x) - radius, yp(d.y) - radius);
+                } : arcCircle)
+            ;
+        //};
     }
 
     init();
