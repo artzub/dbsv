@@ -271,7 +271,7 @@
                         loader.insertDataBack(dir);
                         resetWaiting();
                     }
-                    logError(error);
+                    logError(error ? error.responseText ? error.responseText : error : "");
                     return;
                 }
 
@@ -320,7 +320,7 @@
                     userData.quota - userData.usedQuota,
                     -1,
                     -1,
-                    "freespace",
+                    ".FreeSpace",
                     "sprite_web s_web_page_white_32 icon"
                 )];
             }
@@ -341,7 +341,8 @@
             },
             resume : loader.resume.bind(loader),
             pause : loader.pause.bind(loader),
-            isPaused : loader.isPaused.bind(loader)
+            isPaused : loader.isPaused.bind(loader),
+            getNextId : loader.seqNextValue.bind(loader)
         }
     }
 
@@ -456,7 +457,9 @@
                     1,
                     false,
                     userData.quota - userData.usedQuota,
-                    -1
+                    -1,
+                    -1,
+                    ".FreeSpace"
                 )];
             }
 
@@ -565,7 +568,8 @@
             },
             resume : loader.resume.bind(loader),
             pause : loader.pause.bind(loader),
-            isPaused : loader.isPaused.bind(loader)
+            isPaused : loader.isPaused.bind(loader),
+            getNextId : loader.seqNextValue.bind(loader)
         }
     }
 
@@ -702,7 +706,7 @@
                         userData.quota - userData.usedQuota,
                         -1,
                         -1,
-                        "freespace",
+                        ".FreeSpace",
                         "https://ssl.gstatic.com/docs/doclist/images/icon_10_generic_list.png"
                     )];
                 }
@@ -772,6 +776,8 @@
 
                     if (!dirHash[d.id])
                         dirHash[d.id] = dirs.push(file) - 1;
+
+//                    !file.isDir && file.size < 1 && (file.size = 1);
 
                     if (file.isDir || file.size > 0)
                         dir.children.push(file);
@@ -850,7 +856,8 @@
                 },
                 resume : loader.resume.bind(loader),
                 pause : loader.pause.bind(loader),
-                isPaused : loader.isPaused.bind(loader)
+                isPaused : loader.isPaused.bind(loader),
+                getNextId : loader.seqNextValue.bind(loader)
             }
         }
     }

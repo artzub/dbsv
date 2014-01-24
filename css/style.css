@@ -314,3 +314,11 @@ nav span:before {
 nav span.checked:before {
     content: "●";
 }
+
+nav ul {
+    margin-left: 10px;
+}
+
+nav>ul {
+    margin-left: 0;
+}
