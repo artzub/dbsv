@@ -5,8 +5,39 @@
     <link rel="stylesheet" href="css/style.css"/>
     <link rel="stylesheet" href="css/db.css"/>
     <title>SizeViewer</title>
+    <script>
+        if (location.protocol == "http:")
+            location.protocol = "https:";
+    </script>
 </head>
 <body>
+
+<script>
+    (function() {
+        (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+            (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+                m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+        })(window,document,'script','//ssl.google-analytics.com/analytics.js','ga');
+
+        ga('set', 'forceSSL', true);
+
+        ga('create', 'UA-28343295-9', 'artzub.com', {'cookieExpires': 86400});
+        ga('create', 'UA-28343295-10', 'artzub.com', {name : 'newTracker', 'cookieExpires': 86400});
+
+        function test(r) {
+            return {
+                'hitCallback': function() {
+                    console.log(r + ': hit sent');
+                }
+            };
+        }
+
+        ga('send', 'pageview', test('UA-28343295-9'));
+        ga('newTracker.send', 'pageview', test('UA-28343295-10'));
+    })()
+
+</script>
+
 <header>
     <div class="toolbar">
         <button id="run" style="display: none">Pause</button>
@@ -27,7 +58,7 @@
     </nav>
     <div class="userInfo">
         <span id="userName"></span>
-        <button id="singOut" style="display: none">Sing out</button>
+        <button id="singOut" style="display: none">Sign out</button>
     </div>
 </header>
 <section id="topscreen">
@@ -81,14 +112,6 @@
 <script src="js/loader.js"></script>
 
 <script>
-
-    (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
-        (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
-            m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
-    })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
-
-    ga('create', 'UA-28343295-9', 'artzub.com');
-    ga('send', 'pageview');
 
     'use strict';
 
