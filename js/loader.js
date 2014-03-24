@@ -486,9 +486,11 @@
 
                 d = d3.select(d);
                 var path = decodeURIComponent(d.select("href").text());
-                var is_dir = d.select("propstat").select("resourcetype").node().children.length > 0;
-                var size = parseInt(d.select("propstat").select("getcontentlength").text());
-                var type = is_dir ? "" : d.select("propstat").select("getcontenttype").text();
+                d = d.select("propstat");
+                var is_dir = d.select("resourcetype").node().children.length > 0;
+                var sizenode = d.select("getcontentlength");
+                var size = sizenode.empty() ? 0 : parseInt(sizenode.text());
+                var type = is_dir ? "" : d.select("getcontenttype").text();
 
                 if (path == dir.path)
                     return;
@@ -516,7 +518,6 @@
                     dir.children.push(file);
                 }
                 behavior.doWork(dirTree);
-
             }
         }
 
