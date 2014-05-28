@@ -43,7 +43,7 @@
         <button id="run" style="display: none">Pause</button>
         <span id="wtr">Waiting for ...</span>
     </div>
-    <nav>
+    <nav id="nav" style="display: none">
         <ul>
             <li>Mode:
                 <ul id="drawMode">
@@ -69,14 +69,14 @@
                     <img src="favicon.png" class="icon" style="width: 122px"/>
                     <div>
                         <h1>SizeViewer</h1>
-                        <p>
+                        <div>
                             <br />
                             Service to view the used file space in a cloud file storage.<br />
                             <span style="font-size: 8pt"><u>data will not be used for other purposes or passed on to third organizations</u></span>
                             <hr style="margin: .5em 0" />
                             <span style="font-size: 10pt">Powered by <a href="http://d3js.org">D3.js</a>.<br />
-                            Created by <a href="//artzub.com">Artem Zubkov</a>.</span>
-                        </p>
+                            Created by <a href="//artzub.com">Artem Zubkov</a>. <a href="https://github.com/artzub/dbsv">On Github</a></span>
+                        </div>
                     </div>
                 </div>
             </li>
@@ -89,13 +89,16 @@
     <span id="showts">about</span>
 </section>
 <section id="canvas"></section>
+<section id="svg"></section>
 
-<script src="//cdnjs.cloudflare.com/ajax/libs/d3/3.3.13/d3.min.js" charset="utf-8"></script>
-
-<script src="//rawgithub.com/artzub/d3tooltipjs/master/tooltip.js" charset="utf-8"></script>
-<script src="//rawgithub.com/artzub/d3progressbarjs/master/progressbar.js" charset="utf-8"></script>
+<!--<script src="//cdnjs.cloudflare.com/ajax/libs/d3/3.3.13/d3.min.js" charset="utf-8"></script>-->
+<script src="//cdnjs.cloudflare.com/ajax/libs/d3/3.4.8/d3.min.js" charset="utf-8"></script>
+<script src="//cdn.rawgit.com/artzub/d3tooltipjs/master/tooltip.js" charset="utf-8"></script>
+<script src="//cdn.rawgit.com/artzub/d3progressbarjs/master/progressbar.js" charset="utf-8"></script>
+<script src="//cdn.rawgit.com/artzub/JSONP/master/JSONP.js" charset="utf-8"></script>
 <script src="//cdnjs.cloudflare.com/ajax/libs/dropbox.js/0.10.2/dropbox.min.js"></script>
-<script src="//rawgithub.com/artzub/JSONP/master/JSONP.js" charset="utf-8"></script>
+<script src="js/pathParser.js"></script>
+<script src="js/namespaceSizeViewer.js"></script>
 <!--<script src="//rawgithub.com/artzub/dbsv/master/js/environment.js"></script>-->
 <script>
     function log(label, data) {
@@ -126,7 +129,7 @@
 
     var redirectUrl = DEBUG
             ? "http://localhost:63342/dbsv/index.html"
-            : "https://artzub.com/d3/dbsv/?cloud=db";
+            : "https://artzub.com/d3/sv/?cloud=db";
 
     var PI2 = Math.PI * 2,
         sizes = {
@@ -152,22 +155,23 @@
     };
 
     var dirTree = {}
-            , dirTreeDraw = []
-            , dirTreePack = []
-            , requestTurn = []
-            , hashExtId = {}
-            , params = {}
-            , selected
-            , selectedOld
-            , doStart
-            , loopSnd
-            , loopThd
-            , to = 10
-            , mode = drawMode.partition
-            , cmode = colorMode.path
-            , checkedClass = "checked"
-            ;
-    var client;
+        , dirTreeDraw = []
+        , dirTreePack = []
+        , requestTurn = []
+        , hashExtId = {}
+        , params = {}
+        , selected
+        , hovered
+        , selectedOld
+        , doStart
+        , loopSnd
+        , loopThd
+        , to = 10
+        , mode = drawMode.partition
+        , cmode = colorMode.path
+        , checkedClass = "checked"
+        , client
+        ;
 
     var option = {
         incBar : prgInc,
@@ -195,11 +199,15 @@
     };
 
     function prgInc() {
+        progress &&
         progress.step()
                 .label(progress.pos() + " of " + progress.max());
     }
 
     function prgMax(max) {
+        if (!progress)
+            return 0;
+
         if (arguments.length < 1)
             return progress.max();
         progress.max(max);
@@ -223,6 +231,7 @@
 
     function hideStart() {
         d3.select("#topscreen").classed("hide", true);
+        d3.select('#nav').style('display', null);
         hideWaiter();
     }
 
@@ -305,12 +314,12 @@
             .append('span')
             .text(name)
             .on('click', clickMode(ul, onClick))
-            .each(genSubmenu(onClick))
+            .each(genSubMenu(onClick))
             .classed(checkedClass, setChecked)
         ;
     }
 
-    function genSubmenu(onClick) {
+    function genSubMenu(onClick) {
         return function(d) {
             if (!d.sub)
                 return;
@@ -345,12 +354,16 @@
         {name : "Extension", value: colorMode.extension}
     ], clickColorMode);
 
-    // http://bl.ocks.org/mbostock/4348373
+    //TODO: http://bl.ocks.org/mbostock/4348373
 
-    var w = window.innerWidth,
-        h = window.innerHeight,
-        radius,
-        path;
+    var w = window.innerWidth
+        , h = window.innerHeight
+        , radius
+        , path
+        , cx
+        , cy
+        , useCanvas = !!params.canvas
+        ;
 
     d3.select("#run").on("click", function() {
         client.isPaused() ? client.resume() : client.pause();
@@ -370,9 +383,18 @@
     var color = d3.scale.category20c();
     var colorExt = d3.scale.category20c();
 
-    var svg = d3.select("#canvas").append("svg")
+    var svg = d3.select("#svg").append("svg")
             .attr("width", w)
             .attr("height", h);
+
+    useCanvas && d3.select("#svg").style('pointer-events', 'none');
+    d3.select("#canvas").style('display',useCanvas ? null : 'none');
+
+    var canvas = !useCanvas ? svg : d3.select("#canvas")
+            .append("sv:scene")
+            .attr("width", w)
+            .attr("height", h)
+            .call(d3.helper.sv.init);
 
     var progress = svg.append("g")
         .call(d3.helper.progressbar)
@@ -380,7 +402,11 @@
         .style("display", params.cloud && params.cloud.length > 0 ? null : "none")
     ;
 
-    progress.textPosition("middle")
+    cx = (w / 2);
+    cy = ((h - progress.height() - 10) / 2) + 5;
+
+    progress
+        .textPosition("middle")
         .attr("transform", "translate(" + [0, h - progress.height()] + ")");
 
     function resize() {
@@ -389,8 +415,13 @@
 
         svg.attr("width", w)
            .attr("height", h);
+
+        canvas.attr("width", w)
+              .attr("height", h);
+
         progress.width(w)
                 .attr("transform", "translate(" + [0, h - progress.height()] + ")");
+
         radius = Math.min(w, h - progress.height() - 10) / 2;
         y.range([0, radius]);
 
@@ -401,7 +432,13 @@
 
         yp.range([0, radius * 2]);
 
-        group.attr("transform", "translate(" + [(w / 2), ((h - progress.height() - 10) / 2) + 5] + ")");
+        cx = (w / 2);
+        cy = ((h - progress.height() - 10) / 2) + 5;
+
+        group.attr("transform", "translate(" + [cx, cy] + ")");
+
+        parantsBar.attr("transform", "translate(" + [3, h - progress.height() - 34] + ")");
+
         if (client && client.getDirTree)
             calc(client.getDirTree());
     }
@@ -422,8 +459,12 @@
     var yp = d3.scale.linear()
             .range([0, radius * 2]);
 
-    var group = svg.append("g")
-            .attr("transform", "translate(" + [(w / 2), ((h - progress.height() - 10) / 2) + 5] + ")");
+    var group = canvas.insert((useCanvas ? "sv:" : "") + "g", ':first-child')
+            .attr("transform", "translate(" + [cx, cy] + ")");
+
+    var parantsBar = svg.append("g")
+        .style('pointer-events', 'all')
+        .attr("transform", "translate(" + [3, h - progress.height() - 34] + ")");
 
     var filesInfo = svg.append("g");
 
@@ -433,7 +474,7 @@
 
     var pack = d3.layout.pack()
             .size([radius * 2, radius * 2])
-            .padding(.5)
+            .padding(1)
             .value(function(d) { return d.size || 0; })
             ;
 
@@ -444,9 +485,32 @@
             .value(function(d) { return d.size || 0; })
             ;
 
+    var arc = d3.svg.arc()
+        .startAngle(startAngle)
+        .endAngle(endAngle)
+        .innerRadius(innerRadius)
+        .outerRadius(outerRadius);
+
+    function startAngle(d) { return Math.max(0, Math.min(PI2, x(d.x))); }
+    function endAngle(d) { return Math.max(0, Math.min(PI2, x(d.x + d.dx))); }
+    function innerRadius(d) { return Math.max(0, y(d.y)); }
+    function outerRadius(d) { return Math.max(0, y(d.y + d.dy)); }
+
+    var arcCircle = function(d) {
+        var r = d.r
+            , x = d.x - radius
+            , y = d.y - radius
+            ;
+        return circle(r, x, y);
+    };
+
+    function circle(r, x, y) {
+        return "M " + x + " " + y + " m -" + r + ", 0 a " + [r,r] + " 0 1,1 " + (r * 2) + ",0 a " + [r,r] + " 0 1,1 -" + (r * 2) + ",0";
+    }
+
     function select(d) {
         return function(a, b) {
-            return a || (b.seqid == d.seqid ? b : null);
+            return a || (b.seqid === d.seqid ? b : null);
         }
     }
 
@@ -479,12 +543,15 @@
             var clone = JSON.parse(JSON.stringify(data));
             loopSnd = setTimeout(function() {
 
-                dirTreeDraw =
-                    mode == drawMode.partition ?
-                        partition(clone) :
-                        pack(clone);
+                var tempSel = selected
+                    , temp
+                    ;
 
-                if (mode == drawMode.packExtension) {
+                dirTreeDraw = mode === drawMode.partition ?
+                    partition(clone) :
+                    pack(clone);
+
+                if (mode === drawMode.packExtension) {
                     clone = d3.nest()
                             .key(getExtension)
                             .entries(dirTreeDraw.filter(filterForPackExtension));
@@ -492,10 +559,14 @@
                     dirTreeDraw = packExt(getExtRoot(clone));
                 }
 
+                if (selected && mode === drawMode.partition && needClick)
+                    selected = selected.parent;
+
                 update();
 
-                if (needClick) {
-                    var temp = dirTreeDraw[0];
+                if (mode === drawMode.partition && needClick) {
+                    temp = dirTreeDraw[0];
+                    selected = tempSel;
                     if (selected)
                         temp = dirTreeDraw.reduce(select(selected), null);
                     selected = null;
@@ -514,24 +585,6 @@
                 loopThd = null;
             }, to);
         }
-    }
-
-    var arc = d3.svg.arc()
-        .startAngle(function(d) { return Math.max(0, Math.min(PI2, x(d.x))); })
-        .endAngle(function(d) { return Math.max(0, Math.min(PI2, x(d.x + d.dx))); })
-        .innerRadius(function(d) { return Math.max(0, y(d.y)); })
-        .outerRadius(function(d) { return Math.max(0, y(d.y + d.dy)); });
-
-    var arcCircle = function(d) {
-        var r = d.r
-            , x = d.x - radius
-            , y = d.y - radius
-            ;
-        return circle(r, x, y);
-    };
-
-    function circle(r, x, y) {
-        return "M " + x + " " + y + "m -" + r + ", 0 a " + [r,r] + " 0 1,1 " + (r * 2) + ",0 a " + [r,r] + " 0 1,1 -" + (r * 2) + ",0";
     }
 
     var tf = d3.format('.2f');
@@ -601,23 +654,23 @@
         })
     ;
     function toRgba(c, a) {
-        c = d3.rgb(c);
+        c = d3.rgb(typeof c === 'string' ? c.replace('rgba', 'rgb') : c);
         return "rgba(" + [c.r, c.g, c.b, a] + ")";
     }
 
     function fill(d) {
-        var extCol = cmode == colorMode.extension || mode == drawMode.packExtension;
+        var extCol = cmode === colorMode.extension || mode === drawMode.packExtension;
 
         var curColor = extCol ? colorExt : color;
 
         var prop = "path";
-        var k = d.seqid == -2 ? "~root~" : "";
-        var fs = d.seqid == -1 || (d[prop] && d[prop].indexOf("FreeSpace") > -1);
+        var k = d.seqid === -2 ? "~root~" : "";
+        var fs = d.seqid === -1 || (d[prop] && d[prop].indexOf("FreeSpace") > -1);
 
         if (d.seqid > -1)
             if (extCol) {
                 prop = "type";
-                if (mode == drawMode.packExtension && d.hasOwnProperty("key"))
+                if (mode === drawMode.packExtension && d.hasOwnProperty("key"))
                     prop = "key";
                 k = d[prop];
             }
@@ -628,8 +681,9 @@
         !k && (k = "folder");
 
         var c = fs ? toRgba("#444", .1) : curColor(k);
-
-        return !fs && mode != drawMode.partition && d.isDir ? d3.rgb(c).darker(.5) : c;
+        c = !fs && mode !== drawMode.partition && d.isDir ? toRgba(d3.rgb(c).darker(.1), useCanvas ? .8 : 1) : c;
+        c = hovered === d ? (mode !== drawMode.partition && d.seqid !== -2 ? toRgba('#fff', .8) : toRgba(c, .3)) : c;
+        return c;
     }
 
     function disSet(d) {
@@ -640,14 +694,41 @@
         return "path" + d.seqid;
     }
 
+    function checkIsParent(d, k) {
+        for(; d && k; d = d.parent)
+            if(d.seqid === k.seqid)
+                return true;
+        return false;
+    }
+
     function filter(d) {
-        return d.value > 0 && (!selected || mode == drawMode.pack || mode == drawMode.packExtension || (
-            d.seqid == selected.seqid ||
-            (selected.parent && (d.seqid == selected.parent.seqid || (
-                selected.parent.parent && d.seqid == selected.parent.parent.seqid)
-            )) ||
-            d.path.indexOf(selected.path) == 0
-        ));
+        return d.value > 0 && (mode == drawMode.packExtension || (!selected ? d.level < 4 : d.level < selected.level + 4))
+            && (!selected || mode == drawMode.pack || mode == drawMode.packExtension || (
+                checkIsParent(d, selected) ||
+                    (selected.parent && (d.seqid == selected.parent.seqid || (
+                        selected.parent.parent && d.seqid == selected.parent.parent.seqid)
+                    ))
+            ));
+    }
+
+    function filterPack(k, xp, yp) {
+        return function (d) {
+            function visible(m) {
+                if (!m)
+                    return false;
+
+                var r = m.r * k
+                        , x = xp(m.x)
+                        , y = yp(m.y)
+                        , cr = Math.sqrt(Math.pow(w / 2, 2) + Math.pow(h / 2, 2))
+                        , dr = Math.sqrt(Math.pow((w / 2 - x), 2) + Math.pow(h / 2 - y, 2)) - r
+                        ;
+
+                return dr < cr;
+            }
+
+            return filter(d) && (visible(d) || (d.children && visible(d.children[0])));
+        }
     }
 
     function sortPath(a, b) {
@@ -655,23 +736,66 @@
     }
 
     function isDir(d) {
-        return d.isDir;
+        return d.isDir || d.seqid === -2;
+    }
+
+    function mm() {
+        var method = d3.select(this).on('mousemove.tooltip');
+        method && method.apply(this, arguments);
+    }
+
+    function mout() {
+        var method = d3.select(this).on('mouseout.tooltip');
+        method && method.apply(this, arguments);
+        d3.select(document.body).style('cursor', null);
+        if (hovered) {
+            hovered = null;
+            path.attr("fill", fill);
+            canvas.invalidate();
+        }
+    }
+
+    function mover(d) {
+        var method = d3.select(this).on('mouseover.tooltip');
+        method && method.apply(this, arguments);
+        d3.select(document.body).style('cursor', d.isDir ? 'pointer' : null);
+        mm.apply(this, arguments);
+
+        if (hovered !== d) {
+            hovered = d;
+            path.attr("fill", fill);
+            canvas.invalidate();
+        }
     }
 
     function update() {
+
+        updateParentsBar(getParentsStack(selected || dirTreeDraw[0]));
+
+        var temp = selected;
+        //if (mode !== drawMode.partition)
+        //selected = null;
+
         path = group.selectAll("path")
             .data(dirTreeDraw.filter(filter), key);
 
         var ps = path.enter()
-            .append("path");
+            .append((useCanvas ? "sv:" : "") + "path");
         ps.attr("id", key)
+            .attr('stroke', "#fff")
             .call(tooltip)
             .filter(isDir)
             .on("click", click)
             .attr("class", "isdir")
         ;
 
-        ps.append("text").text(name);
+        if (mode !== drawMode.partition)
+            ps.attr("d", function(d) { return arcCircle({r : 0, x : d.x, y: d.y}); });
+
+        useCanvas && ps.on('mousemove', mm)
+            .on('mouseout', mout)
+            .on('mouseover', mover)
+        ;
 
         path.exit().remove();
 
@@ -679,28 +803,46 @@
 
         (mode != drawMode.partition) && path.sort(sortPath);
 
-        path.style({
-                fill: fill
-            })
-            .attr("d", mode == drawMode.partition ? arc : arcCircle)
+        selected = temp;
+        path.attr("fill", fill);
+
+        if (/*mode !== drawMode.partition && */temp)
+            selected = dirTreeDraw.reduce(select(temp), null);
+
+        mode !== drawMode.partition
+        ? zoom(selected || dirTreeDraw[0])
+        : click(selected, false)
         ;
+
+        useCanvas && canvas.invalidate();
     }
 
     function click(d, ignore) {
         d3.event && d3.event.stopPropagation();
         if (mode == drawMode.partition) {
-            path/*.selectAll("path")*/.transition()
-                .duration(750)
-                .attrTween("d", arcTween(d))
-                .each("end", function() {
-                    if (ignore === false)
-                        lazyUpdate();
-                    else
-                        calc(client.getDirTree());
-                })
-            ;
+            useCanvas && canvas.invalidAlways();
+            if((!selected && d) || (d && d.seqid !== selected.seqid)) {
+                path.transition()
+                    .duration(750)
+                    .attrTween("d", arcTween(d))
+                    .each("end", function () {
+                        useCanvas &&
+                        canvas.invalidOnce().invalidate();
+                        if (ignore === false)
+                            lazyUpdate();
+                        else
+                            calc(client.getDirTree());
+                    });
+            }
+            else {
+                d = d || dirTreeDraw[0];
+                x.domain([d.x, d.x + d.dx]);
+                y.domain([d.y, 1])
+                    .range([d.y ? 20 : 0, radius]);
+                path.attr('d', arc);
+            }
         } else if (mode == drawMode.pack || mode == drawMode.packExtension) {
-            zoom(selected && d.seqid == selected.seqid ? d.parent ? d.parent : dirTreeDraw[0] : d);
+            zoom(selected && d.seqid == selected.seqid ? d.parent ? d.parent : dirTreeDraw[0] : d, ignore);
         }
     }
 
@@ -723,8 +865,9 @@
                 yd = d3.interpolate(y.domain(), [d.y, 1]),
                 yr = d3.interpolate(y.range(), [d.y ? 20 : 0, radius]);
         selected = d;
-        if (d.seqid == -2)
+        if (d.seqid === -2)
             selected = null;
+        updateParentsBar(getParentsStack(selected || dirTreeDraw[0]));
         return function(d, i) {
             return i
                     ? function(t) { return arc(d); }
@@ -732,24 +875,147 @@
         };
     }
 
-    function zoom(d) {
+    function tweenCircle(k, xp, yp) {
+        return function(m) {
+            return circle(k * m.r, xp(m.x) - radius, yp(m.y) - radius);
+        }
+    }
+
+    function zoom(d, ignore) {
+        var old = selected;
+        var that = this;
         selected = d;
+
+        updateParentsBar(getParentsStack(selected || dirTreeDraw[0]));
 
         if (d.seqid == -2) {
             selected = null;
         }
 
+        var arcCircleOld = old ? tweenCircle(
+            radius / old.r,
+            xp.copy().domain([old.x - old.r, old.x + old.r]),
+            yp.copy().domain([old.y - old.r, old.y + old.r])
+        ) : null;
+
         var k = radius / d.r;
         xp.domain([d.x - d.r, d.x + d.r]);
         yp.domain([d.y - d.r, d.y + d.r]);
 
+        var arcCircleNew = tweenCircle(k, xp, yp);
 
-        d3.selectAll("path").transition()
+        if (mode == drawMode.pack) {
+            path = group.selectAll("path")
+                    .data(dirTreeDraw.filter(filterPack(k, xp, yp)), key);
+
+            var ps = path.enter()
+                    .append((useCanvas ? "sv:" : "") + "path");
+            ps.attr("id", key)
+                .attr('stroke', "#fff")
+                .call(tooltip)
+                .attr("d", old ? arcCircleOld : arcCircle)
+                .filter(isDir)
+                .on("click", click)
+                .attr("class", "isdir")
+            ;
+
+            useCanvas && ps.on('mousemove', mm)
+                .on('mouseout', mout)
+                .on('mouseover', mover)
+            ;
+
+            path.exit().remove();
+
+            group.classed("packMode", true);
+
+            path.sort(sortPath);
+
+            path.attr("fill", fill);
+        }
+
+        useCanvas && canvas.invalidAlways();
+        path.transition()
             .duration(750)
-            .attr("d", selected ? function(d) {
-                return circle(k * d.r, xp(d.x) - radius, yp(d.y) - radius);
-            } : arcCircle)
+            .attr("d", selected ? arcCircleNew : arcCircle)
+            .each('end', function(){
+                useCanvas &&
+                    canvas.invalidOnce().invalidate();
+            })
         ;
+    }
+
+    function getParentsStack(selected) {
+        var result = []
+            ;
+
+        for(;selected; selected = selected.parent)
+            result.push(selected);
+
+        return result.reverse();
+    }
+
+    function pathClick(d) {
+        click(d);
+    }
+
+    var lastPathWidth = 0;
+    function pathForPath(d, i) {
+        var g = d3.select(this)
+            , wt
+            ;
+
+        if (g.selectAll('*').empty()) {
+            g.attr('transform', 'translate(' + [lastPathWidth, 0] + ')');
+            wt = g.append('text')
+                    .style('pointer-events', 'none')
+                    .attr('transform', 'translate(' + (i ? 10 : 5 ) + ', 14)')
+                    .attr('dy', '0.35em')
+                    .attr('font-size', '14px')
+                    .attr('fill', '#f9f9f9')
+                    .text(d.seqid === -2 ? 'root' : d.name)
+                    .node();
+            wt = (wt.clientWidth || wt.getComputedTextLength()) + (i ? 10 : 5);
+            g.insert('polygon', ':first-child')
+                    .attr('points', function (d) {
+                        return [
+                            '0,0 ',
+                            wt,
+                            ',0 ',
+                                    wt + 8,
+                            ',15 ',
+                            wt,
+                            ',30 0,30',
+                            (i ? ' 8,15' : '')
+                        ].join('');
+                    })
+                    .attr('fill', fill(d))
+                    .attr('stroke', "#f9f9f9")
+            ;
+        }
+        else {
+            wt = g.select('text').node();
+            wt = (wt.clientWidth || wt.getComputedTextLength()) + (i ? 10 : 5);
+            g.select('polygon').attr('fill', fill(d));
+        }
+
+        lastPathWidth += wt + 3;
+    }
+
+    function updateParentsBar(stack) {
+        if(!stack || !stack.length)
+            parantsBar.selectAll('g').remove();
+
+        var paths = parantsBar.selectAll('g')
+            .data(stack, key);
+
+        lastPathWidth = 0;
+        paths.enter().append('g')
+            .attr('class', 'isdir')
+            .on('click', pathClick);
+
+        paths.exit().remove();
+
+        paths.each(pathForPath);
     }
 
     init();

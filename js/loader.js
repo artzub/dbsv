@@ -475,6 +475,7 @@
         }
 
         function getName(path) {
+            path = path.replace(/\/$/, '');
             return path.substr(path.lastIndexOf("/") + 1);
         }
 
@@ -576,7 +577,7 @@
 
     function GoogleDriveClient(callback) {
         var SCOPES = 'https://www.googleapis.com/auth/drive.readonly';
-        var MaxResults = 1000000000;
+        var MaxResults = 100000000;
 
         env.JSONP("https://apis.google.com/js/client.js", handleClientLoad, {
             callbackParam : 'onload',
@@ -608,12 +609,22 @@
 
                 var workArr = items.concat();
 
-                setTimeout(function aloop() {
+                while(workArr.length) {
+                    step(workArr.shift(), workArr.length);
+                }
+
+                function step(item, ind) {
+                    setTimeout(function () {
+                        fn(item, ind);
+                    }, time || 1);
+                }
+
+                /*setTimeout(function aloop() {
                     if (workArr.length > 0)
                         fn(workArr.shift(), workArr);
                     if (workArr.length > 0)
                         setTimeout(aloop, time || 1);
-                }, time || 1);
+                }, time || 1);*/
             }
 
             function parseQuoteInfo(data) {
@@ -625,7 +636,8 @@
                 userData = data;
 
                 userData.quota = parseInt(data.quotaBytesTotal);
-                userData.usedQuota = parseInt(data.quotaBytesUsed);
+                userData.usedQuota = parseInt(data.quotaBytesUsedAggregate);
+                userData.usedQuotaInTrash = parseInt(data.quotaBytesUsedInTrash);
                 behavior.doSingIn(userData);
 
                 option
@@ -645,7 +657,7 @@
                 var request = gapi.client.drive.files.list({
                     maxResults: MaxResults,
                     pageToken: path,
-                    fields: "items(mimeType,createdDate,embedLink,fileExtension,fileSize,iconLink,id,kind,originalFilename,parents(id,isRoot,kind),quotaBytesUsed,selfLink,title),nextPageToken"
+                    fields: "items(labels,mimeType,createdDate,embedLink,fileExtension,fileSize,iconLink,id,kind,originalFilename,parents(id,isRoot,kind),quotaBytesUsed,selfLink,title),nextPageToken"
                 });
                 request.execute(callback);
             }
@@ -709,7 +721,19 @@
                         -1,
                         ".FreeSpace",
                         "https://ssl.gstatic.com/docs/doclist/images/icon_10_generic_list.png"
+                    ), File(
+                        ".Trash",
+                        "/.Trash",
+                        1,
+                        false,
+                        userData.usedQuotaInTrash,
+                        -3,
+                        -3,
+                        ".Trash",
+                        "https://ssl.gstatic.com/docs/doclist/images/icon_10_generic_list.png"
                     )];
+
+
                 }
 
                 behavior.doSetMaxBar(0);
@@ -724,6 +748,11 @@
             }
 
             function analyseDirInfo(d) {
+
+                behavior.doIncBar();
+
+                if (d.labels.trashed)
+                    return;
 
                 var id = d.id
                     , i
@@ -743,12 +772,10 @@
 
                 dir = dir || dirs[i];
 
-                dir.id == d.id &&
-                    (dir.name = d.title) &&
-                    (dir.path = d.title)
-                ;
-
-                behavior.doIncBar();
+                if (dir.id == d.id) {
+                    dir.name =
+                        dir.path = d.title;
+                }
 
                 if (dir.id != d.id) {
 
@@ -769,19 +796,21 @@
                         d.id
                     );
 
+                    if (!dirHash[d.id])
+                        dirHash[d.id] = dirs.push(file) - 1;
+
                     file.name = d.title;
                     file.level = dir.level + 1;
                     file.size = parseInt(d.quotaBytesUsed);
                     file.type = d.mimeType;
                     file.icon = d.iconLink;
 
-                    if (!dirHash[d.id])
-                        dirHash[d.id] = dirs.push(file) - 1;
-
 //                    !file.isDir && file.size < 1 && (file.size = 1);
 
-                    if (file.isDir || file.size > 0)
+                    if (!file.pushed && (file.isDir || file.size > 0)) {
                         dir.children.push(file);
+                        file.pushed = true;
+                    }
                 }
 
                 makePaths();
@@ -790,21 +819,24 @@
             }
 
             function makePaths() {
-                function path_(p) {
+                function path_(p, level) {
                     return function(d) {
+                        d.level = level + 1;
                         d.path = p + "/" + d.name;
-                        d.children && d.children.forEach(path(d.path));
+                        d.children && d.children.forEach(path(d.path, d.level));
                     }
                 }
 
-                function path(p) {
+                function path(p, level) {
                     return function(d) {
+                        d.level = level + 1;
                         d.path = p + "/" + d.name;
-                        d.children && d.children.forEach(path_(d.path));
+                        d.children && d.children.forEach(path_(d.path, d.level));
                     }
                 }
 
-                dirTree.children.forEach(path(""));
+                dirTree.level = 0;
+                dirTree.children.forEach(path("", dirTree.level));
             }
 
             function parseDirInfo(dir) {
@@ -828,7 +860,7 @@
                         if (data.nextPageToken)
                             loader.appendToRT({path : data.nextPageToken, file : { path : data.nextPageToken }});
 
-                        asyncForEach(data.items, analyseDirInfo, 10);
+                        asyncForEach(data.items, analyseDirInfo, 1);
                     }
 
                     behavior.doIncBar();
