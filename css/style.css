@@ -178,7 +178,7 @@ img.icon16 {
     height: 100%;
     margin: 0 auto;
     position: relative;
-    margin-top: 15%;
+    margin-top: 5%;
 
     -webkit-transition: max-height .5s .2s;
     -moz-transition: max-height .5s .2s;
